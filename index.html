@@ -8,6 +8,7 @@
 .log-dialog .dialog-header{position:sticky;top:0;z-index:2;background:#fff}
 .login-switch{display:flex;gap:6px;padding:5px;border:1px solid var(--line);border-radius:12px;background:var(--bg);margin-bottom:28px}.login-switch button{flex:1;min-height:48px;border:0;border-radius:8px;padding:10px 8px;background:transparent;color:var(--muted);font-weight:650}.login-switch button.selected{background:var(--brand);color:#fff}.login-shell h1{font-size:28px}.login-shell .muted{font-size:14px}
 .date-range-panel{border:1px solid var(--line);border-radius:14px;background:#fff;padding:20px;margin-bottom:20px}.date-range-fields{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.date-range-fields .control{flex:1;min-width:160px}.date-range-fields label{font-size:13px}.date-range-fields input{min-width:0}.date-range-panel .help:empty{display:none}@media(max-width:700px){.date-range-panel{padding:16px}.date-range-fields .control{min-width:calc(50% - 8px)}.date-range-fields input{font-size:14px;width:100%}.date-range-fields>.btn{width:100%}}
+.loading-dialog{width:min(360px,calc(100% - 40px));border:1px solid var(--line);border-radius:18px;background:#fff;color:var(--ink);padding:32px 24px;text-align:center;box-shadow:0 20px 80px #242b3b30}.loading-dialog::backdrop{background:#242b3b55}.loading-dialog h2{font-size:21px;margin-bottom:8px}.loading-dialog p{font-size:14px;color:var(--muted)}.loading-ring{width:38px;height:38px;border:3px solid #f0dce7;border-top-color:var(--brand);border-radius:50%;margin:0 auto 22px;animation:loading-turn .85s linear infinite}.load-error{display:flex;align-items:center;justify-content:space-between;gap:16px}.load-error p{margin-top:4px;overflow-wrap:anywhere}.load-error-actions{display:flex;gap:8px;flex-shrink:0}@keyframes loading-turn{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.loading-ring{animation:none;border-top-color:var(--brand);border-right-color:var(--brand)}}@media(max-width:700px){.load-error{display:block}.load-error-actions{margin-top:12px}}
 </style></head><body>
 <div id="demoBanner" class="demo-banner hidden">Tasarım önizlemesi • Örnek veriler gösteriliyor, Sheets’e kayıt yapılmaz.</div>
 <header class="header"><a class="brand" href="#" id="brandLink"><span class="mark">hedef<span style="font-weight:400">avm</span></span><small>Mağaza ve yönetim<br>Değerlendirme paneli</small></a><button class="btn secondary hidden" id="headerAction">Çıkış yap</button></header>
@@ -397,7 +398,7 @@ const NPS_FONT_BOLD='AAEAAAASAQAABAAgR0RFRgLh80EAAAEsAAAFxkdQT1O9f29HAAAG9AABGBR
 const APPS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbwh_n0IEUH1B3Wd_d9kPu9aFz2zGzLWZU7FcSf5rn53DcYtLTqonCnF-MBdjTDVkVpu/exec';
 const STORES=['Kavacık','Paşabahçe','Çekmeköy','Yenidoğan','Sultanbeyli','Çayırova','Gebze','Körfez','Derince','İzmit','Gölcük','İnegöl','Düzce'];
 const CHANNELS=['Mağazanızı yoldan geçerken fark ettim','Bir tanıdığımın önerisiyle geldim','hedefavm.com veya sosyal medya sayesinde','Daha önce de alışveriş yapmıştım, memnun kaldığım için tekrar geldim'];
-const demo=new URLSearchParams(location.search).has('demo');let rangeStart='',rangeEnd='',activeDateRange=null;let loginRole='store',loginStore='';let token='',user=null,data=null,tab='reviews',page=1,query='',storeFilter='',monthFilter='',scoreFilter='',busy=false;const app=document.getElementById('app');
+const demo=new URLSearchParams(location.search).has('demo');let loadedDashboardState=null;let rangeStart='',rangeEnd='',activeDateRange=null;let loginRole='store',loginStore='';let token='',user=null,data=null,tab='reviews',page=1,query='',storeFilter='',monthFilter='',scoreFilter='',busy=false;const app=document.getElementById('app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=s=>new Intl.DateTimeFormat('tr-TR',{dateStyle:'medium',timeStyle:'short',timeZone:'Europe/Istanbul'}).format(new Date(s));
 async function rpc(fn,...args){
@@ -432,17 +433,35 @@ function loginView(){
   try{
    const res=await rpc('login',{portalRole:role,store,username:role==='admin'?document.getElementById('username').value:'',password:document.getElementById('password').value});
    if(res.user.role!==role||(role==='store'&&res.user.store!==store)){try{await rpc('logout',res.token);}catch{}throw Error('Seçilen panel veya mağaza hesapla eşleşmiyor. Giriş bilgilerini kontrol edin.');}
-   token=res.token;user=res.user;rangeStart='';rangeEnd='';activeDateRange=null;tab='reviews';storeFilter='';monthFilter='';query='';scoreFilter='';page=1;header();await loadDashboard();
+   token=res.token;user=res.user;data=null;loadedDashboardState=null;rangeStart='';rangeEnd='';activeDateRange=null;tab='reviews';storeFilter='';monthFilter='';query='';scoreFilter='';page=1;header();await loadDashboard();
   }catch(err){if(f.isConnected){message(err.message);buttonBusy(f,false);document.querySelectorAll('[data-login-role]').forEach(b=>b.disabled=false);}}
  };
 }
+function dashboardFilterState(){return {monthFilter,storeFilter,rangeStart,rangeEnd,activeDateRange:activeDateRange?{...activeDateRange}:null};}
+function restoreDashboardFilters(state){monthFilter=state.monthFilter;storeFilter=state.storeFilter;rangeStart=state.rangeStart;rangeEnd=state.rangeEnd;activeDateRange=state.activeDateRange?{...state.activeDateRange}:null;}
+function showDashboardLoading(){
+ const popup=document.createElement('dialog');popup.id='dashboardLoading';popup.className='loading-dialog';popup.setAttribute('aria-labelledby','loadingTitle');popup.setAttribute('aria-describedby','loadingDescription');
+ popup.innerHTML='<div role="status" aria-live="polite"><div class="loading-ring" aria-hidden="true"></div><h2 id="loadingTitle">Veriler güncelleniyor</h2><p id="loadingDescription">Değerlendirmeler yükleniyor…</p></div>';
+ popup.addEventListener('cancel',e=>e.preventDefault());document.body.appendChild(popup);app.setAttribute('aria-busy','true');popup.showModal();return popup;
+}
 async function loadDashboard(){
- app.innerHTML='<div class="spinner" role="status">Değerlendirmeler yükleniyor…</div>';
- try{const filters={month:monthFilter,store:storeFilter,...(activeDateRange?{startDate:activeDateRange.start,endDate:activeDateRange.end}:{})};
-  data=await rpc('getDashboard',token,filters);
-  if(activeDateRange&&(data.dateRange?.start!==activeDateRange.start||data.dateRange?.end!==activeDateRange.end))throw Error('Tarih filtresi backend tarafından uygulanmadı. Güncel Code.gs dosyasını Yeni sürüm olarak dağıtın.');
-  user=data.user;monthFilter=data.month;dashboard();
- }catch(err){app.innerHTML=`<section class="panel"><h2>Panel yüklenemedi</h2><p style="margin:15px 0" role="alert">${esc(err.message)}</p><button class="btn" id="retry">Tekrar dene</button> <button class="btn secondary" id="relogin">Giriş ekranı</button></section>`;document.getElementById('retry').onclick=loadDashboard;document.getElementById('relogin').onclick=()=>{user=null;token='';header();loginView();};}
+ if(busy)return;busy=true;
+ const requested=dashboardFilterState(),focusId=document.activeElement?.id,scroll={x:window.scrollX,y:window.scrollY};
+ const popup=showDashboardLoading();document.getElementById('dashboardLoadError')?.remove();
+ try{
+  const filters={month:requested.monthFilter,store:requested.storeFilter,...(requested.activeDateRange?{startDate:requested.activeDateRange.start,endDate:requested.activeDateRange.end}:{})};
+  const nextData=await rpc('getDashboard',token,filters);
+  if(requested.activeDateRange&&(nextData.dateRange?.start!==requested.activeDateRange.start||nextData.dateRange?.end!==requested.activeDateRange.end))throw Error('Tarih filtresi backend tarafından uygulanmadı. Güncel Code.gs dosyasını Yeni sürüm olarak dağıtın.');
+  data=nextData;user=data.user;monthFilter=data.month;loadedDashboardState=dashboardFilterState();dashboard();
+ }catch(err){
+  if(data&&data.user?.id===user?.id&&loadedDashboardState){restoreDashboardFilters(loadedDashboardState);dashboard();}else loginView();
+  const notice=document.createElement('section');notice.id='dashboardLoadError';notice.className='status load-error';notice.setAttribute('role','alert');
+  notice.innerHTML='<div><strong>Veriler güncellenemedi</strong><p></p></div><div class="load-error-actions"><button class="btn secondary" type="button" data-load-retry>Tekrar dene</button><button class="btn text" type="button" data-load-dismiss>Kapat</button></div>';
+  notice.querySelector('p').textContent=err.message;notice.querySelector('[data-load-retry]').onclick=()=>{restoreDashboardFilters(requested);loadDashboard();};notice.querySelector('[data-load-dismiss]').onclick=()=>notice.remove();app.prepend(notice);
+ }finally{
+  popup.close();popup.remove();app.removeAttribute('aria-busy');busy=false;
+  if(focusId)document.getElementById(focusId)?.focus({preventScroll:true});window.scrollTo(scroll.x,scroll.y);
+ }
 }
 function getPeriodLabel(){return data?.dateRange?data.dateRange.start.split('-').reverse().join('.')+' - '+data.dateRange.end.split('-').reverse().join('.'):data?.month||'';}
 function hasUnappliedDates(){return rangeStart!==(activeDateRange?.start||'')||rangeEnd!==(activeDateRange?.end||'');}
